@@ -1,4 +1,4 @@
-# https://superuser.com/questions/1168551/turn-on-off-bluetooth-radio-adapter-from-cmd-powershell-in-windows-10/1293303#1293303
+# https://web.archive.org/web/20210327231256/https://superuser.com/questions/1168551/turn-on-off-bluetooth-radio-adapter-from-cmd-powershell-in-windows-10/1293303#1293303
 
 If ((Get-Service bthserv).Status -eq 'Stopped') { Start-Service bthserv }
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
