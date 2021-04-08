@@ -7,7 +7,7 @@ Param (
 
 $username = "VJLs6DrND3al3m-HnWubeRIkMsqBg2jhPB2AzvOr"
 
-$baseUri          = "https://192.168.1.155/api"
+$baseUri          = "https://avohue.myfiosgateway.com/api"
 $lightsUri        = "$baseUri/$username/lights"
 $groupsUri        = "$baseUri/$username/groups"
 $configurationUri = "$baseUri/$username/config"
@@ -38,6 +38,11 @@ function Toggle-Group ($name) {
   Write-Verbose "Toggling Group [$name]"
 
   $group = Get-Group $name
+  if (!$group) {
+    Write-Warning "Group '$name' not found"
+    return
+  }
+
   $groupId = $group.id
   
   Write-Host "Group state: [$($group.state)]"
