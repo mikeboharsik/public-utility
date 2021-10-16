@@ -7,7 +7,7 @@ Param(
 	[switch] $AsDecimal
 )
 
-$processedOutput = (exiftool $Filename).Split('\n') `
+$processedOutput = (exiftool -GPSPosition $Filename).Split('\n') `
 	| Where-Object { $_ -Match "GPS Position" } `
 	| ForEach-Object { $_.Split(' : ') } `
 	| Select-Object -Skip 1 `

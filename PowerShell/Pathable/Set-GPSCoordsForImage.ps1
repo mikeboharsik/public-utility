@@ -17,12 +17,26 @@ if (!(Test-Path $Filename)) {
 }
 
 if ($Coords) {
-	$Latitude, $Longitude = $Coords -Split ","
+	[double] $Latitude, [double] $Longitude = $Coords -Split ","
+}
+
+if ($Latitude -lt 0) {
+	$latitudeRef = "South"
+} else {
+	$latitudeRef = "North"
+}
+
+if ($Longitude -lt 0) {
+	$longitudeRef = "West"
+} else {
+	$longitudeRef = "East"
 }
 
 $exiftoolArgs = @(
 	"-GPSLatitude=$Latitude"
+	"-GPSLatitudeRef=$latitudeRef"
 	"-GPSLongitude=$Longitude"
+	"-GPSLongitudeRef=$longitudeRef"
 	$Filename
 )
 
