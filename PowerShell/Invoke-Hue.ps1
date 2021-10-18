@@ -3,13 +3,29 @@
 [CmdletBinding()]
 Param (
   [string] $GroupName = $null,
-  [string] $Hostname = 'avohue.myfiosgateway.com',
   [switch] $Toggle,
   [switch] $PlayBeep
 )
 
 $configPath = "$PSScriptRoot\Invoke-Hue.config.json"
-$baseUri    = "https://$Hostname/api"
+
+function Get-ConfigValue($key) {
+  $config = Get-Content $configPath 
+  if (!$config) {
+    throw "Failed to load config from '$configPath'"
+  }
+
+  $config = $config | ConvertFrom-Json -AsHashtable
+
+  return $config[$key]
+}
+
+$hostname = Get-ConfigValue('hostname')
+if (!$hostname) {
+  throw "Failed to load hostname from '$configPath'"
+}
+
+$baseUri = "https://$hostname/api"
 
 function Invoke-GenerateUsername {
   $result = $null
@@ -33,7 +49,7 @@ function Invoke-GenerateUsername {
       Write-Verbose "Failed to get username, retrying"
       Start-Sleep 1
     }
-  } while ($result -eq $null)
+  } while ($null -eq $result)
 
   Set-Content $configPath (ConvertTo-Json @{ username = $result })
 
@@ -41,15 +57,11 @@ function Invoke-GenerateUsername {
 }
 
 function Get-Username {
-  if (!(Test-Path $configPath)) {
-    Invoke-GenerateUsername
-  }
+  $username = Get-ConfigValue('username')
 
-  $config = Get-Content $configPath | ConvertFrom-Json
+  Write-Verbose "Loaded username '$username'"
 
-  Write-Verbose "Loaded username '$($config.username)'"
-
-  return $config.username
+  return $username
 }
 
 function Get-LightsUri {
@@ -81,7 +93,9 @@ function Get-Group ($name) {
   }
   $groups = $tmp
 
-  Write-Verbose "Found [$($groups.Length)] groups"
+  $groupNames = ($groups | Select-Object -ExpandProperty Name) -Join ", "
+
+  Write-Verbose "Found [$($groups.Length)] groups [$groupNames]"
 
   $group = $groups | Where-Object { $_.name -eq $name }
 
