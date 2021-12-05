@@ -13,7 +13,6 @@ Param(
   [string] $Length = "1:00:00",
   [string] $VideoBitrate = "24M",
   [string] $AudioBitrate = "384k",
-  [string] $OutputPath = "D:\ShadowPlay\upload",
   [int]    $GameAudioDelay = 50,
   [string] $GameVolume = "1.0",
   [string] $MicVolume = "1.0",
@@ -21,48 +20,81 @@ Param(
   [switch] $Preview,
   [switch] $KeepOriginal,
 
-  [string] $FullPathToFfmpeg = "C:\ProgramData\chocolatey\bin\ffmpeg.exe",
-  [string] $FullPathToShadowPlay = "D:\ShadowPlay",
-  [string] $FullPathToVlc = "C:\Program Files\VideoLAN\VLC\vlc.exe",
-
   [string] $Game = $null
 )
 
+if ((($fileInfo = Get-ChildItem $PSCommandPath) | Select-Object -ExpandProperty LinkType) -eq 'SymbolicLink') {
+  Write-Verbose "Detected symlink $fileInfo"
+}
+
+$config = Get-Content "$PSScriptRoot\trimvideo.config.json" | ConvertFrom-Json -AsHashtable
+
+$UploadsOutputPath = $config.uploadsOutputPath
+Write-Verbose "`$UploadsOutputPath = $UploadsOutputPath"
+if (!$UploadsOutputPath) {
+  Write-Error "Output path '$UploadsOutputPath' is invalid"
+  exit 1
+}
+
+$FullPathToFfmpeg = $config.fullPathToFfmpeg
 Write-Verbose "`$FullPathToFfmpeg = $FullPathToFfmpeg"
 if (!(Test-Path $FullPathToFfmpeg)) {
   Write-Error "ffmpeg path '$FullPathToFfmpeg' is invalid"
   exit 1
 }
 
+$FullPathToShadowPlay = $config.fullPathToShadowPlay
 Write-Verbose "`$FullPathToShadowPlay = $FullPathToShadowPlay"
 if (!(Test-Path $FullPathToShadowPlay)) {
   Write-Error "ShadowPlay path '$FullPathToShadowPlay' is invalid"
   exit 1
 }
 
+$FullPathToVlc = $config.fullPathToVlc
 Write-Verbose "`$FullPathToVlc = $FullPathToVlc"
 if (!(Test-Path $FullPathToVlc)) {
   Write-Error "VLC path '$FullPathToVlc' is invalid"
   exit 1
 }
 
-$uploadPath = "$FullPathToShadowPlay\upload"
-if (!(Test-Path $uploadPath)) {
-  New-Item -Name $uploadPath -ItemType Directory
+$uploadsPath = "$FullPathToShadowPlay\uploads"
+if (!(Test-Path $uploadsPath)) {
+  New-Item -Path $uploadsPath -ItemType Directory | Out-Null
 
-  Write-Verbose "Created directory '$uploadPath'"
+  Write-Verbose "Created directory '$uploadsPath'"
 }
 
 $trashPath = "$FullPathToShadowPlay\trash"
 if (!(Test-Path $trashPath)) {
-  New-Item -Name $trashPath -ItemType Directory
+  New-Item -Name $trashPath -ItemType Directory | Out-Null
 
   Write-Verbose "Created directory '$trashPath'"
 }
 
+function Kill-Vlc {
+  $sw = [System.Diagnostics.Stopwatch]::new()
+  $sw.Start()
+
+  if (PsList | Select-String 'vlc') {
+    PsKill 'vlc.exe' | Out-Null
+  }
+
+  while (PsList | Select-String 'vlc') {
+    Write-Verbose "VLC still in process list, checking again"
+
+    if ($sw.ElapsedMilliseconds -gt 5000) {
+      throw "Failed to kill VLC in a reasonable amount of time"
+    }
+
+    Start-Sleep -Milliseconds 500
+  }
+
+  $sw.Stop()
+}
+
 function SendFileToRecycleBin($path) {
   # prevent VLC from blocking the delete by having a file lock on what we're deleting
-  if (PsList | Select-String 'vlc') { PsKill 'vlc.exe' }
+  Kill-Vlc
 
   Move-Item $path $trashPath
 }
@@ -71,7 +103,7 @@ function Get-VideoFiles {
   $pattern = "$($FullPathToShadowPlay -Replace '\\', '\\')\\(.*)\\"
 
   return Get-ChildItem $FullPathToShadowPlay -File -Recurse -Include "*mp4"
-  | Where-Object { $_.FullName -NotLike '*upload*' -and $_.FullName -NotLike "*trash*" -and $_.FullName -NotLike '*Temp*' }
+  | Where-Object { $_.FullName -NotLike '*uploads*' -and $_.FullName -NotLike "*trash*" -and $_.FullName -NotLike '*Temp*' -and $_.FullName -NotLike '*skip*' }
   | ForEach-Object {
     $filename = $_.FullName
 
@@ -112,6 +144,18 @@ function ProcessVideo {
     }
     $NewStartTime = Read-Host "Start time"
     if ($NewStartTime) {
+      if ($NewStartTime -eq 's') {
+        Kill-Vlc
+
+        $skipPath = (Resolve-Path (Join-Path $FullPathToVideo "..")).Path + "\skip"
+        if (!(Test-Path $skipPath)) {
+          New-Item -ItemType Directory -Path $skipPath | Out-Null
+        }
+        Move-Item $FullPathToVideo $skipPath
+
+        return 0
+      }
+
       Write-Verbose "Setting `$StartTime from $StartTime to $NewStartTime"
       $StartTime = $NewStartTime
     }
@@ -147,27 +191,18 @@ function ProcessVideo {
     }
   }
 
-  Write-Verbose $FullPathToVideo
-  $FullPathToVideo -Match "(\d{4}\.\d{2}\.\d{2}) - (\d{2}\.\d{2}\.\d{2})\.\d{2}\.DVR\.mp4" | Out-Null
+  Write-Verbose "Using file path $FullPathToVideo"
 
-  $Date = $Matches[1]
-  if (!$?) {
-    throw "Failed to parse date from video path '$FullPathToVideo'"
-  }
+  $Date = (Get-ChildItem $FullPathToVideo).CreationTime.ToString("yyyy.MM.ddTHH.mm.ss")
 
-  $Time = $Matches[2]
-  if (!$?) {
-    throw "Failed to parse time from video path '$FullPathToVideo'"
-  }
-
-  $OutputFileName = "$($VideoData.Game) - $OutputFileName - $Date`T$Time"
+  $OutputFileName = "$($VideoData.Game) - $OutputFileName - $Date"
   if (!($OutputFileName -Match "\.mp4")){
     $OutputFileName += ".mp4"
   }
 
-  if (!(Test-Path $uploadPath)) {
-    New-Item $uploadPath -ItemType Directory
-    Write-Verbose "Created '$uploadPath'"
+  if (!(Test-Path $uploadsPath)) {
+    New-Item $uploadsPath -ItemType Directory
+    Write-Verbose "Created '$uploadsPath'"
   }
 
   $msg = "Feel free to use this footage for your own purposes. I would simply ask that you include a credit back to me for it."
@@ -189,7 +224,7 @@ function ProcessVideo {
     $opts += "-filter_complex", "[0:a:0]adelay=$GameAudioDelay|$GameAudioDelay,volume=$GameVolume[game];[0:a:1]acopy,volume=$MicVolume[mic];[game][mic]amerge=inputs=2[mix]", "-ac", "2", "-map", "0:v", "-map", "[mix]"
   }
 
-  $opts += "$OutputPath\$OutputFileName"
+  $opts += "$UploadsOutputPath\$OutputFileName"
 
   Write-Verbose "Using options: $opts"
 

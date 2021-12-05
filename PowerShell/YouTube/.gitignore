@@ -1,1 +1,5 @@
 access_token.json
+config_.json
+
+!trimvideo.config.json
+!youtube.config.json
