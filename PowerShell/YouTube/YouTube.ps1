@@ -58,18 +58,38 @@ function Get-AuthorizationHeader {
   return $header
 }
 
+# https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol
 function UploadVideo {
-  [CmdletBinding()]
+  [CmdletBinding(SupportsShouldProcess = $true)]
   Param(
-    [string] $VideoPath,
-    [string] $BearerToken
+    [Parameter(Mandatory = $true)]
+    [string] $VideoPath
   )
+
+  if (!($VideoPath -Match "uploads\\(.*?)\.mp4$")) {
+    throw "'$VideoPath' has a filename in an unrecognized format"
+  }
+
+  $game, $title, $datetime = $Matches[1] -Split " - "
+  $datetime -Match "(\d{4})\.(\d{2})\.(\d{2})T(\d{2})\.(\d{2})\.(\d{2})" | Out-Null
+
+  $year, $month, $day, $hour, $min, $sec = $Matches.Keys | Where-Object { $_ -ne 0 } | Sort-Object | ForEach-Object { $Matches[$_] }
+
+  $datetimeString = "$year-$month-$day $($hour):$($min):$($sec)"
+
+  $descriptionBoilerplate = "Feel free to use this footage for your own purposes. I would simply ask that you include a credit back to me for it."
+
+  $description = @"
+$dateTimeString
+
+$descriptionBoilerplate
+"@.Trim()
 
   try {
     $parts = @{
       snippet = @{
-        title = "Test Title"
-        description = "Description"
+        title = "$game - $title"
+        description = $description
         tags = @()
         categoryId = 20 # gaming
       }
@@ -77,17 +97,60 @@ function UploadVideo {
         privacyStatus = "private"
         embeddable = $true
         license = "youtube"
-        publishAt = ""
+        publishAt = (Get-Date -AsUTC).AddHours(1).ToString("o")
       }
-    } | ConvertTo-Json -Depth 10
+    } | ConvertTo-Json
 
-    $cont = Read-Host "Metadata has been configured as:`n`n$parts`n`nContinue with uploading video?"
+    $cont = Read-Host "Metadata has been configured as:`n$parts`n`nContinue with uploading video?"
     if ($cont.ToLower() -ne "y") { return }
 
-    $res = Invoke-WebRequest `
-      -Uri $uploadVideoEndpoint `
-      -Headers (Get-AuthorizationHeader) `
-      -Body $parts
+    $headers = (Get-AuthorizationHeader)
+    $headers['Content-Type'] = 'application/octet-stream'
+
+    $sessionArgs = @{
+      Uri = $uploadVideoEndpoint
+      Method = 'POST'
+      Headers = $headers
+      Body = $parts
+    }
+    if ($PSCmdlet.ShouldProcess("$uploadVideoEndpoint`n$(ConvertTo-Json $sessionArgs)", "Create upload session")) {
+      $res = Invoke-WebRequest @sessionArgs
+
+      if (!$res.Headers.Location) {
+        throw "Failed to retrieve video upload URI"
+      }
+
+      $global:sessionResult = $res
+    } else {
+      $res = @{ Headers = @{ Location = "https://mockurl.com" } }
+    }
+
+    $uploadArgs = @{
+      Uri = ($res.Headers.Location | Select-Object -First 1)
+      Method = 'PUT'
+      Headers = $headers
+      InFile = $VideoPath
+    }
+    if ($PSCmdlet.ShouldProcess("$uploadVideoEndpoint`n$(ConvertTo-Json $uploadArgs)", "Upload video bytes")) {
+      $res = Invoke-WebRequest @uploadArgs
+
+      $global:uploadResult = $res
+    }
+
+    throw "Incomplete"
+
+    $config = Get-Content "$PSScriptRoot\trimvideo.config.json" | ConvertFrom-Json -AsHashtable
+    $uploadsFolder = $config.uploadsOutputPath
+    if (!$uploadsFolder) {
+      throw "`$uploadsFolder is not set"
+    }
+
+    $completeFolder = "$uploadsFolder\complete"
+    if (!(Test-Path $completeFolder)) {
+      New-Item -ItemType Directory -Path "$completeFolder" | Out-Null
+    }
+
+    Move-Item $VideoPath $completeFolder | Out-Null
   } catch {
     Write-Error $_
 
@@ -314,3 +377,5 @@ function Get-AccessToken {
   $script:token = $token
   return $script:token
 }
+
+Write-Verbose "Imported YouTube functions"
