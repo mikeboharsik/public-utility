@@ -137,8 +137,6 @@ $descriptionBoilerplate
       $global:uploadResult = $res
     }
 
-    throw "Incomplete"
-
     $config = Get-Content "$PSScriptRoot\trimvideo.config.json" | ConvertFrom-Json -AsHashtable
     $uploadsFolder = $config.uploadsOutputPath
     if (!$uploadsFolder) {
@@ -296,44 +294,48 @@ function Invoke-OAuthFlow {
   [CmdletBinding()]
   Param()
 
-  try {
-    $oauthUri = Get-OAuthUri
-
-    Write-Verbose "Sending OAuth request to $oauthUri"
-    Start-Process $oauthUri
-
-    $localUri = "$(Get-RedirectUri)/"
-
-    $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add($localUri)
-
-    $listener.Start()
-
-    $context = $listener.GetContext()
+  if ($PSCmdlet.ShouldProcess('Get access token')) {
+    try {
+      $oauthUri = Get-OAuthUri
+  
+      Write-Verbose "Sending OAuth request to $oauthUri"
+      Start-Process $oauthUri
+  
+      $localUri = "$(Get-RedirectUri)/"
+  
+      $listener = New-Object System.Net.HttpListener
+      $listener.Prefixes.Add($localUri)
+  
+      $listener.Start()
+  
+      $context = $listener.GetContext()
+      
+      $data = $context.Request.Url.ToString().Split('?')
+        | ForEach-Object { $_.Split('&') }
+        | Select-Object -Skip 1
+        | ForEach-Object { $out = @{} } { $tmp = $_.Split("="); $out[$tmp[0]] = $tmp[1] } { $out }
     
-    $data = $context.Request.Url.ToString().Split('?')
-      | ForEach-Object { $_.Split('&') }
-      | Select-Object -Skip 1
-      | ForEach-Object { $out = @{} } { $tmp = $_.Split("="); $out[$tmp[0]] = $tmp[1] } { $out }
-  
-    $content = [System.Text.Encoding]::UTF8.GetBytes((Get-OAuthHtml))
-    $context.Response.OutputStream.Write($content, 0, $content.Length)
-    $context.Response.Close()
-  
-    $tokenUri = (Get-OAuthTokenUri) -Replace "{{code}}", $data.code
-  
-    $tokenData = Invoke-RestMethod `
-      -Uri $tokenUri `
-      -Method 'POST'
-  
-    Set-Content (Get-AccessTokenPath) (ConvertTo-Json -Depth 10 $tokenData)
-  
-    return $tokenData.access_token
-  } finally {
-    if ($listener -and $listener.IsListening) {
-      $listener.Stop()
+      $content = [System.Text.Encoding]::UTF8.GetBytes((Get-OAuthHtml))
+      $context.Response.OutputStream.Write($content, 0, $content.Length)
+      $context.Response.Close()
+    
+      $tokenUri = (Get-OAuthTokenUri) -Replace "{{code}}", $data.code
+    
+      $tokenData = Invoke-RestMethod `
+        -Uri $tokenUri `
+        -Method 'POST'
+    
+      Set-Content (Get-AccessTokenPath) (ConvertTo-Json -Depth 10 $tokenData)
+    
+      return $tokenData.access_token
+    } finally {
+      if ($listener -and $listener.IsListening) {
+        $listener.Stop()
+      }
     }
   }
+
+  return "MOCK_ACCESS_TOKEN"
 }
 
 function Get-AccessToken {
