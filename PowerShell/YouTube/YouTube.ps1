@@ -1,62 +1,16 @@
+. .\YouTube-OAuth.ps1
+
 $apiBase = "https://www.googleapis.com"
+
+$myChannelEndpoint = "$apiBase/youtube/v3/channels?mine=true&part=contentDetails"
+
 $uploadVideoParameters = "uploadType=resumable&part=snippet,status"
 $uploadVideoEndpoint = "$apiBase/upload/youtube/v3/videos?$uploadVideoParameters"
-$myChannelEndpoint = "$apiBase/youtube/v3/channels?mine=true&part=contentDetails"
+
 $playlistsEndpoint = "$apiBase/youtube/v3/playlists?mine=true&part=snippet,status&maxResults=50"
 $playlistItemsEndpoint = "$apiBase/youtube/v3/playlistItems?playlistId={{playlistId}}&part=snippet,status&maxResults=50"
 
-function Get-AccessTokenPath {
-  return "$PSScriptRoot\access_token.json"
-}
-
-function Get-OAuthHtml {
-  return @"
-<html>
-  <head>
-    <title>Local OAuth</title>
-    <style>
-      body {
-        background-color: black;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-    </style>
-  </head>
-
-  <body>
-  You can close this web page now!
-  </body>
-</html>
-"@
-}
-
-function Get-BearerToken {
-  [CmdletBinding()]
-  Param()
-
-  if (!$script:token) {
-    Write-Verbose "Script-scope token has not yet been set"
-
-    return Get-AccessToken
-  } else {
-    Write-Verbose "Script-scope token has already been set"
-
-    return $script:token
-  }
-}
-
-function Get-AuthorizationHeader {
-  [CmdletBinding()]
-  Param()
-
-  $header = @{"Authorization" = "Bearer $(Get-BearerToken)"}
-
-  Write-Verbose "Using Authorization header: $(ConvertTo-Json $header)"
-
-  return $header
-}
+$videosEndpoint = "$apiBase/youtube/v3/videos?part=snippet,status,fileDetails"
 
 # https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol
 function UploadVideo {
@@ -188,7 +142,12 @@ function Get-Uploads {
 
   $channelData = Get-MyChannelData
 
-  $uploadsId = $channelData.items[0].contentDetails.relatedPlaylists.uploads  
+  $uploadsId = $channelData
+    | Select-Object -ExpandProperty items
+    | Select-Object -First 1
+    | Select-Object -ExpandProperty contentDetails
+    | Select-Object -ExpandProperty relatedPlaylists
+    | Select-Object -ExpandProperty uploads
 
   $videos = @()
   $pageToken = $null
@@ -206,178 +165,151 @@ function Get-Uploads {
   return $videos
 }
 
-function Get-RedirectUri {
-  [CmdletBinding()]
-  Param()
-
-  $data = Get-ClientData
-  $uri = $data.clientRedirectUri
-
-  return $uri
-}
-
-function Get-ClientData {
-  [CmdletBinding()]
-  Param()
-  $configPath = "$PSScriptRoot\youtube.config.json"
-
-  if (!(Test-Path $configPath)) {
-    throw "'$configPath' is missing"
-  }
-
-  $config = Get-Content $configPath | ConvertFrom-Json -AsHashtable
-
-  $required = @("clientId", "clientRedirectUri", "clientSecret")
-  $found = @{}
-  $missing = @()
-
-  foreach ($key in $required) {
-    $curVal = $config[$key]
-
-    if (!$curVal) {
-      $missing += $key
-      continue
-    }
-
-    $found[$key] = $curVal
-
-    Write-Host $config[$key]
-  }
-
-  if ($missing.Length -eq 0) {
-    Write-Verbose ($found | ConvertTo-Json -Compress)
-
-    return $found
-  }
-
-  throw "Missing config settings from '$configPath': [$($missing -Join ', ')]"
-}
-
-function Get-OAuthUri {
-  [CmdletBinding()]
-  Param()
-
-  $clientId = (Get-ClientData).clientId
-
-  $oauthParams = @(
-    "access_type=offline"
-    "client_id=$clientId"
-    "include_granted_scopes=true"
-    "redirect_uri=$(Get-RedirectUri)"
-    "response_type=code"
-    "scope=https://www.googleapis.com/auth/youtube"
-  )
-  
-  return "https://accounts.google.com/o/oauth2/v2/auth?$($oauthParams -Join '&')"
-}
-
-function Get-OAuthTokenUri {
-  [CmdletBinding()]
-  Param()
-
-  $clientData = Get-ClientData
-
-  $clientId = $clientData.clientId
-  $clientSecret = $clientData.clientSecret
-
-  $oauthTokenParams = @(
-    "client_id=$clientId"
-    "client_secret=$clientSecret"
-    "grant_type=authorization_code"
-    "redirect_uri=$(Get-RedirectUri)"
-  )
-
-  return "https://oauth2.googleapis.com/token?code={{code}}&$($oauthTokenParams -Join '&')"
-}
-
-function Invoke-OAuthFlow { 
-  [CmdletBinding()]
-  Param()
-
-  if ($PSCmdlet.ShouldProcess('Get access token')) {
-    try {
-      $oauthUri = Get-OAuthUri
-  
-      Write-Verbose "Sending OAuth request to $oauthUri"
-      Start-Process $oauthUri
-  
-      $localUri = "$(Get-RedirectUri)/"
-  
-      $listener = New-Object System.Net.HttpListener
-      $listener.Prefixes.Add($localUri)
-  
-      $listener.Start()
-  
-      $context = $listener.GetContext()
-      
-      $data = $context.Request.Url.ToString().Split('?')
-        | ForEach-Object { $_.Split('&') }
-        | Select-Object -Skip 1
-        | ForEach-Object { $out = @{} } { $tmp = $_.Split("="); $out[$tmp[0]] = $tmp[1] } { $out }
-    
-      $content = [System.Text.Encoding]::UTF8.GetBytes((Get-OAuthHtml))
-      $context.Response.OutputStream.Write($content, 0, $content.Length)
-      $context.Response.Close()
-    
-      $tokenUri = (Get-OAuthTokenUri) -Replace "{{code}}", $data.code
-    
-      $tokenData = Invoke-RestMethod `
-        -Uri $tokenUri `
-        -Method 'POST'
-    
-      Set-Content (Get-AccessTokenPath) (ConvertTo-Json -Depth 10 $tokenData)
-    
-      return $tokenData.access_token
-    } finally {
-      if ($listener -and $listener.IsListening) {
-        $listener.Stop()
-      }
-    }
-  }
-
-  return "MOCK_ACCESS_TOKEN"
-}
-
-function Get-AccessToken {
+function Get-Video {
   [CmdletBinding()]
   Param(
-    [switch] $ForceGetToken
+    [Parameter(Mandatory = $true)]
+    [string] $VideoId
   )
 
-  $token = $null
+  $uri = "$videosEndpoint&id=$VideoId"
 
-  if (!$ForceGetToken) {
-    $existingTokenFileData = Get-ChildItem (Get-AccessTokenPath) -ErrorAction SilentlyContinue
-    if ($existingTokenFileData) {
-      $content = (Get-Content (Get-AccessTokenPath) | ConvertFrom-Json)
+  return Invoke-RestMethod `
+    -Uri $uri `
+    -Headers (Get-AuthorizationHeader)
+    | Select-Object -ExpandProperty items
+    | Select-Object -First 1
+}
 
-      $updated = $existingTokenFileData.LastWriteTime
-      $token = $content.access_token
-      $validSeconds = $content.expires_in
-      $now = Get-Date
+function Get-VideosSearch {
+  [CmdletBinding()]
+  Param()
 
-      if ($now -ge $updated.AddSeconds($validSeconds)) {
-        Write-Verbose "Stored token has expired"
-        $token = $null
-      } else {
-        Write-Verbose "Got existing token from file"
+  $baseUri = "$apiBase/youtube/v3/search?part=snippet&forMine=true&type=video&maxResults=50&order=date"
 
-        $script:token = $token
-        return $script:token
-      }
-    } 
+  $global:GetVideosSearchResults = @()
+  $videos = @()
+
+  $nextPageToken = $null
+  do {
+    if ($nextPageToken) {
+      $uri = "$baseUri&pageToken=$nextPageToken"
+    } else {
+      $uri = $baseUri
+    }
+
+    Write-Verbose "`$uri = $uri"
+
+    $res = Invoke-RestMethod `
+      -Uri $uri `
+      -Headers (Get-AuthorizationHeader)
+
+      $global:GetVideosSearchResults += $res
+
+    $videos += $res.items
+
+    $nextPageToken = $res.nextPageToken
+  } while ($nextPageToken)
+
+  return $videos
+}
+
+function Get-Videos {
+  [CmdletBinding()]
+  Param(
+    [string[]] $VideoIds
+  )
+
+  $baseUri = "$apiBase/youtube/v3/videos?part=status,fileDetails&maxResults=50"
+  $pageIndex = 0
+
+  $global:GetVideosResults = @()
+
+  $videos = @()
+
+  do {
+    $ids = $VideoIds[(50 * $pageIndex) .. ((50 * $pageIndex) + 49)]
+    if (!$ids.Length) {
+      break
+    }
+
+    if ($nextPageToken) {
+      $uri = "$baseUri&id=$($ids -Join ',')&pageToken=$nextPageToken"
+    } else {
+      $uri = "$baseUri&id=$($ids -Join ',')"
+    }
+
+    Write-Verbose "`$uri = $uri"
+
+    $res = Invoke-RestMethod `
+      -Uri $uri `
+      -Headers (Get-AuthorizationHeader)
+
+    $global:GetVideosResults += $res
+    $videos += $res.items
+
+    $pageIndex++
+  } while ($true)
+
+  return $videos
+}
+
+function Update-Video {
+  [CmdletBinding(SupportsShouldProcess)]
+  Param(
+    [Parameter(Mandatory = $true)]
+    [string] $Id,
+
+    [Parameter(Mandatory = $false)]
+    [string] $CategoryId = 20,
+
+    [Parameter(Mandatory = $true)]
+    [string] $Title,
+
+    [Parameter(Mandatory = $true)]
+    [string] $Description,
+
+    [Parameter(Mandatory = $true)]
+    [string] $PublishAt
+  )
+
+  if (!$global:UpdateVideoResults) {
+    $global:UpdateVideoResults = @()
   }
 
-  if (!$token) {
-    Write-Verbose "Getting new OAuth token"
+  $uri = "$apiBase/youtube/v3/videos?part=id,snippet,status"
 
-    $token = Invoke-OAuthFlow
+  $body = @{
+    id = $Id
+    snippet = @{
+      categoryId = $CategoryId
+      description = $Description
+      title = $Title
+    }
+    status = @{
+      privacyStatus = "private"
+      publishAt = $PublishAt
+    }
+  } | ConvertTo-Json -Depth 10 -Compress
 
-    Write-Verbose "Got new token from OAuth flow"
+  $headers = (Get-AuthorizationHeader)
+  $headers['Content-Type'] = 'application/json'
+
+  Write-Verbose "Sending request to '$uri' with body $(ConvertTo-Json -Depth 10 -Compress $body)"
+
+  if ($PSCmdlet.ShouldProcess("PUT $uri $(ConvertTo-Json -Depth 10 -Compress $body)")) {
+    $res = Invoke-RestMethod `
+      -Uri $uri `
+      -Method 'PUT' `
+      -Body $body `
+      -Headers $headers
+
+    $global:UpdateVideoResults += @{ id = $Id; result = $res }
+
+    if (!$res) {
+      throw "Update-Video failed"
+    }
   }
-
-  $script:token = $token
-  return $script:token
 }
 
 Write-Verbose "Imported YouTube functions"
