@@ -7,6 +7,8 @@ Param(
 	[switch] $UseExistingData
 )
 
+$combinedCachePath = "$PSScriptRoot\combinedCache.json"
+
 . '.\YouTube.ps1'
 
 function Get-ZeroedDate {
@@ -19,29 +21,35 @@ function Get-ZeroedDate {
 	return $DateTime.AddMinutes(-$DateTime.Minute).AddSeconds(-$DateTime.Second).AddMilliseconds(-$DateTime.Millisecond)
 }
 
-if (!$UseExistingData -or !$global:YouTubeSearchResults) {
-	$global:YouTubeSearchResults = Get-VideosSearch
+if (!(Test-Path $combinedCachePath)) {
+	if (!$UseExistingData -or !$global:YouTubeSearchResults) {
+		$global:YouTubeSearchResults = Get-VideosSearch
 
-	Write-Verbose "Updated `$global:videos"
-}
-
-$global:YouTubeCombinedResults = @()
-$global:YouTubeSearchResults
-	| ForEach-Object {
-		$global:YouTubeCombinedResults += ($_ | ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json -AsHashtable)
+		Write-Verbose "Updated `$global:videos"
 	}
 
-if (!$UseExistingData -or !$global:YouTubeVideoResults) {
-	$global:YouTubeVideoResults = Get-Videos -VideoIds ($global:YouTubeSearchResults | Select-Object -ExpandProperty id | Select-Object -ExpandProperty videoId)
+	$global:YouTubeCombinedResults = @()
+	$global:YouTubeSearchResults
+		| ForEach-Object {
+			$global:YouTubeCombinedResults += ($_ | ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json -AsHashtable)
+		}
+
+	if (!$UseExistingData -or !$global:YouTubeVideoResults) {
+		$global:YouTubeVideoResults = Get-Videos -VideoIds ($global:YouTubeSearchResults | Select-Object -ExpandProperty id | Select-Object -ExpandProperty videoId)
+	}
+
+	$global:YouTubeVideoResults
+		| ForEach-Object {
+			$curVid = $_
+			$result = $global:YouTubeCombinedResults | Where-Object { $curVid.id -eq $_.id.videoId }
+			$result.status = $curVid.status
+			$result.fileDetails = $curVid.fileDetails
+		}
+
+	Set-Content $combinedCachePath (ConvertTo-Json -Depth 10 $global:YouTubeVideoResults)
 }
 
-$global:YouTubeVideoResults
-	| ForEach-Object {
-		$curVid = $_
-		$result = $global:YouTubeCombinedResults | Where-Object { $curVid.id -eq $_.id.videoId }
-		$result.status = $curVid.status
-		$result.fileDetails = $curVid.fileDetails
-	}
+$global:YouTubeCombinedResults = Get-Content $combinedCachePath | ConvertFrom-Json -Depth 10 -AsHashtable
 
 # we can assume that the last published video is the first video returned that has a set description
 $lastVideoWithDescription = $global:YouTubeCombinedResults
@@ -54,7 +62,7 @@ $lastScheduledPublish = Get-ZeroedDate $lastVideoWithDescription.status.publishA
 Write-Verbose "`$lastPublishedAt = $lastPublishedAt"
 Write-Verbose "`$lastScheduledPublish = $lastScheduledPublish"
 
-$privateVideosWithoutSchedule = $global:YouTubeCombinedResults
+[hashtable[]] $privateVideosWithoutSchedule = $global:YouTubeCombinedResults
 	| Where-Object { $null -eq $_.status.publishAt -and $_.snippet.publishedAt -gt $lastPublishedAt -and 'private' -eq $_.status.privacyStatus }
 	| Sort-Object { $_.snippet.publishedAt }
 
@@ -69,6 +77,8 @@ $metadata = @()
 
 for ($i = 0; $i -lt $privateVideosWithoutSchedule.Length; $i++) {
 	$video = $privateVideosWithoutSchedule[$i]
+
+	Write-Verbose "`$video = $(ConvertTo-Json -Depth 10 -Compress $video)"
 
 	$game, $title, $datetime = ($video.fileDetails.fileName -Replace ".mp4", "") -Split " - "
 
