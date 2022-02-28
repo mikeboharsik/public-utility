@@ -220,6 +220,10 @@ function Get-Videos {
     [string[]] $VideoIds
   )
 
+  if (!$VideoIds) {
+    return @()
+  }
+
   $baseUri = "$apiBase/youtube/v3/videos?part=status,fileDetails&maxResults=50"
   $pageIndex = 0
 
@@ -266,7 +270,7 @@ function Update-Video {
     [Parameter(Mandatory = $true)]
     [string] $Title,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter()]
     [string] $Description,
 
     [Parameter(Mandatory = $true)]

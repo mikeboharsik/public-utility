@@ -4,31 +4,67 @@ Param(
 	[ValidateRange(1, 24)]
 	[int] $VideosPerDay = 4,
 
-	[switch] $UseExistingData
+	[switch] $UseExistingData,
+
+	[switch] $SkipDescription,
+
+	[switch] $OnlyUpdateCache
 )
 
 $combinedCachePath = "$PSScriptRoot\combinedCache.json"
 
 . '.\YouTube.ps1'
 
-function Get-ZeroedDate {
+function Get-Description {
 	[CmdletBinding()]
 	Param(
 		[Parameter(Mandatory = $true)]
-		[DateTime] $DateTime
+		$DateTime
 	)
 
-	return $DateTime.AddMinutes(-$DateTime.Minute).AddSeconds(-$DateTime.Second).AddMilliseconds(-$DateTime.Millisecond)
+	if ($SkipDescription) {
+		return ''
+	}
+
+	$descriptionBoilerplate = "Feel free to use this footage for your own purposes. I would simply ask that you include a credit back to me for it."
+
+	$year = $datetime.Substring(0, 4)
+	$month = $datetime.Substring(5, 2)
+	$day = $datetime.Substring(8, 2)
+	$hour = $datetime.Substring(11, 2)
+	$minute = $datetime.Substring(14, 2)
+	$second = $datetime.Substring(17, 2)
+
+	$datetimeStr = "$year-$month-$day $($hour):$($minute):$second"
+
+	return @"
+$dateTimeStr
+
+$descriptionBoilerPlate
+"@.Trim()
 }
 
-if (!(Test-Path $combinedCachePath)) {
+function Get-ZeroedDate {
+	[CmdletBinding()]
+	Param([Nullable[DateTime]] $DateTime)
+
+	if ($DateTime) {
+		$d = $DateTime
+	} else {
+		$d = Get-Date
+	}
+
+	return $d.AddMinutes(-$d.Minute).AddSeconds(-$d.Second).AddMilliseconds(-$d.Millisecond)
+}
+
+if (!(Test-Path $combinedCachePath) -or $OnlyUpdateCache) {
 	if (!$UseExistingData -or !$global:YouTubeSearchResults) {
 		$global:YouTubeSearchResults = Get-VideosSearch
 
 		Write-Verbose "Updated `$global:videos"
 	}
 
-	$global:YouTubeCombinedResults = @()
+	$global:YouTubeCombinedResults = [hashtable[]]@()
 	$global:YouTubeSearchResults
 		| ForEach-Object {
 			$global:YouTubeCombinedResults += ($_ | ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json -AsHashtable)
@@ -42,19 +78,30 @@ if (!(Test-Path $combinedCachePath)) {
 		| ForEach-Object {
 			$curVid = $_
 			$result = $global:YouTubeCombinedResults | Where-Object { $curVid.id -eq $_.id.videoId }
+
 			$result.status = $curVid.status
 			$result.fileDetails = $curVid.fileDetails
 		}
 
-	Set-Content $combinedCachePath (ConvertTo-Json -Depth 10 $global:YouTubeVideoResults)
+	Set-Content $combinedCachePath (ConvertTo-Json -Depth 10 $global:YouTubeCombinedResults)
 }
 
 $global:YouTubeCombinedResults = Get-Content $combinedCachePath | ConvertFrom-Json -Depth 10 -AsHashtable
 
+if ($OnlyUpdateCache) {
+	return
+}
+
 # we can assume that the last published video is the first video returned that has a set description
 $lastVideoWithDescription = $global:YouTubeCombinedResults
-	| Where-Object { "" -ne $_.snippet.description }
+	| Where-Object { $_.status.privacyStatus -eq 'public' }
 	| Select-Object -First 1
+
+if (!$lastVideoWithDescription) {
+	Write-Host "No videos to schedule"
+
+	return
+}
 
 $lastPublishedAt = $lastVideoWithDescription.snippet.publishedAt
 $lastScheduledPublish = Get-ZeroedDate $lastVideoWithDescription.status.publishAt
@@ -66,7 +113,7 @@ Write-Verbose "`$lastScheduledPublish = $lastScheduledPublish"
 	| Where-Object { $null -eq $_.status.publishAt -and $_.snippet.publishedAt -gt $lastPublishedAt -and 'private' -eq $_.status.privacyStatus }
 	| Sort-Object { $_.snippet.publishedAt }
 
-$descriptionBoilerplate = "Feel free to use this footage for your own purposes. I would simply ask that you include a credit back to me for it."
+Write-Verbose "Number of private videos without schedule: $($privateVideosWithoutSchedule.Length)"
 
 $scheduleIntervalHours = 24 / $VideosPerDay
 if ($scheduleIntervalHours % 1 -ne 0) {
@@ -80,29 +127,14 @@ for ($i = 0; $i -lt $privateVideosWithoutSchedule.Length; $i++) {
 
 	Write-Verbose "`$video = $(ConvertTo-Json -Depth 10 -Compress $video)"
 
-	$game, $title, $datetime = ($video.fileDetails.fileName -Replace ".mp4", "") -Split " - "
-
-	$year = $datetime.Substring(0, 4)
-	$month = $datetime.Substring(5, 2)
-	$day = $datetime.Substring(8, 2)
-	$hour = $datetime.Substring(11, 2)
-	$minute = $datetime.Substring(14, 2)
-	$second = $datetime.Substring(17, 2)
-
-	$datetimeStr = "$year-$month-$day $($hour):$($minute):$second"
-
-	$description = @"
-$datetimeStr
-
-$descriptionBoilerplate
-"@.Trim()
+	$game, $title, $datetime = ($video.fileDetails.fileName -Replace ".mp4", "") -Split " - "	
 
 	$lastScheduledPublish = $lastScheduledPublish.AddHours($scheduleIntervalHours)
 
 	$curData = @{
 		Id = $video.id.videoId
-		Title = "$game - $title"
-		Description = $description
+		Title = $title
+		Description = (Get-Description $datetime)
 		PublishAt = $lastScheduledPublish.ToString("o")
 	}
 
