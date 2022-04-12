@@ -11,7 +11,7 @@ Param(
 
   [string] $StartTime = "0:00",
   [string] $Length = "1:00:00",
-  [string] $VideoBitrate = "24M",
+  [string] $VideoBitrate = "68M",
   [string] $AudioBitrate = "384k",
   [int]    $GameAudioDelay = 50,
   [string] $GameVolume = "1.0",
@@ -216,6 +216,7 @@ function ProcessVideo {
     "-movflags", "faststart"
     "-profile:v", "high"
     "-level:v", "4.0"
+    "-vf", "scale=3840x2160:flags=lanczos"
   )
 
   if ($MixAudioChannels) {
