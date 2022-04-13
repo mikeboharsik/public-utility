@@ -15,6 +15,22 @@ $combinedCachePath = "$PSScriptRoot\combinedCache.json"
 
 . '.\YouTube.ps1'
 
+function Get-ShuffledIndices([int] $Count) {
+		[int[]] $result = @()
+
+		do {
+			$cur = $null
+
+			do {
+				[int] $cur = Get-Random -Minimum 0 -Maximum ($Count)
+			} while ($result.Contains($cur))
+
+			$result += $cur
+		} while ($result.Length -lt $Count)
+
+		return $result
+	}
+
 function Get-Description {
 	[CmdletBinding()]
 	Param(
@@ -94,7 +110,7 @@ if ($OnlyUpdateCache) {
 
 # we can assume that the last published video is the first video returned that has a set description
 $lastVideoWithDescription = $global:YouTubeCombinedResults
-	| Where-Object { $_.status.privacyStatus -eq 'public' }
+	| Where-Object { $_.snippet.description }
 	| Select-Object -First 1
 
 if (!$lastVideoWithDescription) {
@@ -106,7 +122,7 @@ if (!$lastVideoWithDescription) {
 $lastPublishedAt = $lastVideoWithDescription.snippet.publishedAt
 $lastScheduledPublish = Get-ZeroedDate $lastVideoWithDescription.status.publishAt
 
-Write-Verbose "`$lastPublishedAt = $lastPublishedAt"
+Write-Verbose "`$lastPublishedAt (uploaded) = $lastPublishedAt"
 Write-Verbose "`$lastScheduledPublish = $lastScheduledPublish"
 
 [hashtable[]] $privateVideosWithoutSchedule = $global:YouTubeCombinedResults
@@ -115,6 +131,12 @@ Write-Verbose "`$lastScheduledPublish = $lastScheduledPublish"
 
 Write-Verbose "Number of private videos without schedule: $($privateVideosWithoutSchedule.Length)"
 
+if ($privateVideosWithoutSchedule.Length -eq 0) {
+	Write-Host "No videos to schedule"
+
+	return
+}
+
 $scheduleIntervalHours = 24 / $VideosPerDay
 if ($scheduleIntervalHours % 1 -ne 0) {
 	throw "Please provide a value for VideosPerDay that divides 24 evenly"
@@ -122,8 +144,9 @@ if ($scheduleIntervalHours % 1 -ne 0) {
 
 $metadata = @()
 
-for ($i = 0; $i -lt $privateVideosWithoutSchedule.Length; $i++) {
-	$video = $privateVideosWithoutSchedule[$i]
+$randomlyOrderedIndices = Get-ShuffledIndices -Count $privateVideosWithoutSchedule.Length
+foreach ($index in $randomlyOrderedIndices) {
+	$video = $privateVideosWithoutSchedule[$index]
 
 	Write-Verbose "`$video = $(ConvertTo-Json -Depth 10 -Compress $video)"
 
