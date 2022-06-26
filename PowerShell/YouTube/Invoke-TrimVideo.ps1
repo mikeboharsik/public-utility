@@ -137,11 +137,17 @@ function ProcessVideo {
   }
 
   if ($Preview -or $Automate) {
-    & $FullPathToVlc $FullPathToVideo
-
     if ($VideoData) {
       Write-Host "Game: $($VideoData.Game)"
+
+      if ($VideoData.Game -Match "\\") {
+        Write-Verbose "Detected video in sub-folder, skipping"
+        return 0
+      }
     }
+
+    & $FullPathToVlc $FullPathToVideo
+
     $NewStartTime = Read-Host "Start time"
     if ($NewStartTime) {
       if ($NewStartTime -eq 's') {
