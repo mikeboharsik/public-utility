@@ -1,0 +1,1 @@
+../Invoke-StitchGoPro.ps1
