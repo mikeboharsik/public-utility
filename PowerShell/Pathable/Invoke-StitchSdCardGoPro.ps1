@@ -1,0 +1,1 @@
+../Invoke-StitchSdCardGoPro.ps1
