@@ -15,7 +15,7 @@ $originalPath = Get-Location
 
 $date = Get-Date -Format "yyyy-MM-dd"
 
-$outputFolderPath = "$DestinationFolder/$date"
+$outputFolderPath = "$DestinationPath/$date"
 New-Item -ItemType Directory -Path $outputFolderPath -ErrorAction SilentlyContinue | Out-Null
 
 Push-Location $outputFolderPath
@@ -34,7 +34,7 @@ try {
 	$copiedFiles = Get-ChildItem $outputFolderPath
 	foreach ($file in $copiedFiles) {
 		$name = $file.Name
-		$newName = & "$originalPath/Get-SensibleGoProFilename.ps1" -Filename $name
+		$newName = & (Resolve-Path "$PSScriptRoot/../Get-SensibleGoProFilename.ps1") -Filename $name
 
 		Move-Item $name $newName
 	}
@@ -47,7 +47,7 @@ try {
 	$data = (exiftool -MediaCreateDate $initialFile.FullName)
 	$mediaCreateDate = ($data.Split(': ')[1]) -Replace "(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})", "$($date)_`$4-`$5-`$6"
 
-	& "$originalPath/Invoke-StitchLocalGoPro.ps1" -StitchedFilename $mediaCreateDate
+	& (Resolve-Path "$PSScriptRoot/Invoke-StitchLocalGoPro.ps1") -StitchedFilename $mediaCreateDate
 
 	if ($DeleteOriginalFiles) {
 		Remove-Item $files
