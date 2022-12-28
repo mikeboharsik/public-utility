@@ -144,7 +144,22 @@ function Toggle-Group ($name) {
 
 try {
   if ($Toggle) {
-    return Toggle-Group $GroupName
+    $success = $false
+    $retries = 3
+	$response
+    
+    while ($success -eq $false -and $retries -gt 0) {
+	  try {
+	    $response = Toggle-Group $GroupName
+		$success = $true
+	  } catch {
+		$retries -= 1
+		
+        Write-Error $_.Exception
+	  }
+    }
+    
+    return $response
   }
 
   return ConvertTo-Json (Get-Group $GroupName)

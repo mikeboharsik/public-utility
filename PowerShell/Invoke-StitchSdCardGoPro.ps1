@@ -27,8 +27,6 @@ try {
 	$originalFiles = Get-ChildItem $OriginalContentPath
 		| Where-Object { $_.Extension -eq ".MP4" }
 
-	Write-Verbose ($originalFiles | ConvertTo-Json)
-
 	Copy-Item -Path $originalFiles -Destination $outputFolderPath
 
 	$copiedFiles = Get-ChildItem $outputFolderPath
