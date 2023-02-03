@@ -42,7 +42,7 @@ try {
 
 	$initialFile = $files[0]
 
-	$data = (exiftool -MediaCreateDate $initialFile.FullName)
+	$data = (exiftool -api LargeFileSupport=1 -MediaCreateDate $initialFile.FullName)
 	$mediaCreateDate = ($data.Split(': ')[1]) -Replace "(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})", "$($date)_`$4-`$5-`$6"
 
 	& (Resolve-Path "$PSScriptRoot/Invoke-StitchLocalGoPro.ps1") -StitchedFilename $mediaCreateDate
