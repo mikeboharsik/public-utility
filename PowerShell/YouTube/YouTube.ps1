@@ -39,6 +39,9 @@ $dateTimeString
 $descriptionBoilerplate
 "@.Trim()
 
+  $now = Get-Date -AsUTC
+  $publishAt = $now.AddHours(1)
+
   try {
     $parts = @{
       snippet = @{
@@ -51,7 +54,7 @@ $descriptionBoilerplate
         privacyStatus = "private"
         embeddable = $true
         license = "youtube"
-        publishAt = (Get-Date -AsUTC).AddHours(1).ToString("o")
+        publishAt = $publishAt
       }
     } | ConvertTo-Json
 
@@ -265,7 +268,7 @@ function Update-Video {
     [string] $Id,
 
     [Parameter(Mandatory = $false)]
-    [string] $CategoryId = 20,
+    [string] $CategoryId = '20',
 
     [Parameter(Mandatory = $true)]
     [string] $Title,
@@ -283,18 +286,44 @@ function Update-Video {
 
   $uri = "$apiBase/youtube/v3/videos?part=id,snippet,status"
 
-  $body = @{
-    id = $Id
-    snippet = @{
-      categoryId = $CategoryId
-      description = $Description
-      title = $Title
+  $body = @{}
+
+  if ($Id) {
+    $body.id = $Id
+  }
+
+  if ($CategoryId) {
+    if (!$body.snippet) {
+      $body.snippet = @{}
     }
-    status = @{
+
+    $body.snippet.categoryId = $CategoryId
+  }
+
+  if ($Description) {
+    if (!$body.snippet) {
+      $body.snippet = @{}
+    }
+
+    $body.snippet.description = $Description
+  }
+
+  if ($Title) {
+    if (!$body.snippet) {
+      $body.snippet = @{}
+    }
+
+    $body.snippet.title = $Title
+  }
+
+  if ($PublishAt) {
+    $body.status = @{
       privacyStatus = "private"
       publishAt = $PublishAt
     }
-  } | ConvertTo-Json -Depth 10 -Compress
+  }
+
+  $body = ConvertTo-Json $body -Depth 10 -Compress
 
   $headers = (Get-AuthorizationHeader)
   $headers['Content-Type'] = 'application/json'
@@ -311,6 +340,8 @@ function Update-Video {
     $global:UpdateVideoResults += @{ id = $Id; result = $res }
 
     if (!$res) {
+      Write-Warning "Make sure you aren't using cached data ( ͡° ͜ʖ ͡°)"
+      Write-Host (ConvertFrom-Json $body | ConvertTo-Json)
       throw "Update-Video failed"
     }
   }

@@ -158,7 +158,7 @@ foreach ($index in $randomlyOrderedIndices) {
 		Id = $video.id.videoId
 		Title = $title
 		Description = (Get-Description $datetime)
-		PublishAt = $lastScheduledPublish.ToString("o")
+		PublishAt = $lastScheduledPublish.ToString("yyyy-MM-ddTHH:mm:ssZ")
 	}
 
 	Update-Video @curData
