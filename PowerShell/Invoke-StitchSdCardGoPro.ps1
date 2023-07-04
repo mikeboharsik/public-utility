@@ -3,7 +3,7 @@ Param(
 	[string] $SdCardPath = "P:",
 	[string] $ContentPath = "DCIM/100GOPRO",
 
-	[string] $DestinationPath = "D:/wip",
+	[string] $DestinationPath = "D:/wip/walks",
 
 	[switch] $DeleteOriginalFiles,
 	[switch] $SkipEject
