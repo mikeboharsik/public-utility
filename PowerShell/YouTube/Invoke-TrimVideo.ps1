@@ -214,15 +214,14 @@ function ProcessVideo {
   $msg = "Feel free to use this footage for your own purposes. I would simply ask that you include a credit back to me for it."
 
   [string[]]$opts = @(
-    "-i", $FullPathToVideo
     "-ss",  $StartTime
     "-t", $Length
+    "-i", $FullPathToVideo
     "-b:v", $VideoBitrate
     "-b:a", $AudioBitrate
-    "-movflags", "faststart"
     "-profile:v", "high"
     "-level:v", "4.0"
-    "-vf", "scale=3840x2160:flags=lanczos"
+    #"-vf", "scale=3840x2160:flags=lanczos"
   )
 
   if ($MixAudioChannels) {
