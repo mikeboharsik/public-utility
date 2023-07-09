@@ -8,7 +8,7 @@ $uploadVideoParameters = "uploadType=resumable&part=snippet,status"
 $uploadVideoEndpoint = "$apiBase/upload/youtube/v3/videos?$uploadVideoParameters"
 
 $playlistsEndpoint = "$apiBase/youtube/v3/playlists?mine=true&part=snippet,status&maxResults=50"
-$playlistItemsEndpoint = "$apiBase/youtube/v3/playlistItems?playlistId={{playlistId}}&part=snippet,status&maxResults=50"
+$playlistItemsEndpoint = "$apiBase/youtube/v3/playlistItems?playlistId={{playlistId}}&part=contentDetails,snippet,status&maxResults=50"
 
 $videosEndpoint = "$apiBase/youtube/v3/videos?part=snippet,status,fileDetails"
 
@@ -166,6 +166,27 @@ function Get-Uploads {
   } while ($pageToken)
 
   return $videos
+}
+
+function Get-AllPlaylistItems {
+  Param(
+    [string] $PlaylistId
+  )
+
+  $items = @()
+  $pageToken = $null
+
+  do {
+    $res = Get-PlaylistItems $PlaylistId $pageToken
+
+    $items += $res.items
+
+    $pageToken = $res.nextPageToken
+
+    Write-Verbose "Set pageToken to $pageToken"
+  } while ($pageToken)
+
+  return $items
 }
 
 function Get-Video {
