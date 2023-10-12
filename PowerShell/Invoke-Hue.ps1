@@ -25,7 +25,59 @@ if (!$hostname) {
   throw "Failed to load hostname from '$configPath'"
 }
 
-$baseUri = "https://$hostname/api"
+$baseUri = "https://$hostname/clip/v2"
+
+function Get-Username {
+  $username = Get-ConfigValue('username')
+
+  Write-Verbose "Loaded username '$username'"
+
+  return $username
+}
+
+function Get-LightsUri {
+  return "/resource/light"
+}
+
+function Get-GroupsUri {
+  return "/resource/grouped_light"
+}
+
+function Get-RoomsUri {
+  return "/resource/room"
+}
+
+function Get-ConfigUri {
+  throw "Not Implemented"
+}
+
+function Invoke-HueRequest {
+  Param(
+    [string] $ResourcePath,
+    [string] $Method = 'GET',
+    [string] $Body = ''
+  )
+
+  $username = Get-Username
+  if (!$username) {
+    throw "Failed to load username from '$configPath'"
+  }
+
+  $Uri = "$($baseUri)$ResourcePath"
+  $Headers = @{
+    'Content-Type' = 'application/json'
+    'hue-application-key' = Get-ConfigValue('username')
+  }
+
+  Write-Verbose (@{ uri = $Uri; headers = $Headers; body = $Body } | ConvertTo-Json -Depth 10)
+
+  return Invoke-RestMethod `
+    -Uri $Uri `
+    -Method $Method `
+    -Headers $Headers `
+    -Body $Body `
+    -SkipCertificateCheck
+}
 
 function Invoke-GenerateUsername {
   $result = $null
@@ -38,13 +90,13 @@ function Invoke-GenerateUsername {
 
   do {
     $res = Invoke-RestMethod `
-      -Uri $baseUri `
+      -Uri "https://$hostname/api" `
       -Method POST `
-      -Body (ConvertTo-Json @{ devicetype = $name }) `
+      -Body (ConvertTo-Json @{ devicetype = $name; generateclientkey = $true }) `
       -SkipCertificateCheck
 
     if ($res.success) {
-      $result = $res.success.username
+      $result = $res[0].success.username
     } else {
       Write-Verbose "Failed to get username, retrying"
       Start-Sleep 1
@@ -56,48 +108,23 @@ function Invoke-GenerateUsername {
   Write-Verbose "Generated username '$result'"
 }
 
-function Get-Username {
-  $username = Get-ConfigValue('username')
-
-  Write-Verbose "Loaded username '$username'"
-
-  return $username
-}
-
-function Get-LightsUri {
-  return "$baseUri/$(Get-Username)/lights"
-}
-
-function Get-GroupsUri {
-  return "$baseUri/$(Get-Username)/groups"
-}
-
-function Get-ConfigUri {
-  return "$baseUri/$(Get-Username)/config"
-}
-
 function Get-Group ($name) {
+  $roomsUri = Get-RoomsUri
   $groupsUri = Get-GroupsUri
 
-  Write-Verbose "Getting groups with [$groupsUri]"
+  Write-Verbose "Getting rooms with [$roomsUri] and groups with [$groupsUri]"
 
-  $groups = Invoke-RestMethod `
-    -Uri $groupsUri `
-    -Method GET `
-    -SkipCertificateCheck
+  $rooms = (Invoke-HueRequest -ResourcePath $roomsUri).data
 
-  $tmp = @()
-  foreach ($info in $groups.PSObject.Properties) {
-    $info.Value | Add-Member -MemberType NoteProperty -Name id -Value $info.Name
-    $tmp += $info.Value
+  $room = $rooms | Where-Object { $_.metadata.name -eq $name }
+  if (!$room) {
+    throw "Failed to find room with name [$name]"
   }
-  $groups = $tmp
 
-  $groupNames = ($groups | Select-Object -ExpandProperty Name) -Join ", "
+  $groupedLightId = $room.services[0].rid
+  $group = (Invoke-HueRequest -ResourcePath "$groupsUri/$groupedLightId").data[0]
 
-  Write-Verbose "Found [$($groups.Length)] groups [$groupNames]"
-
-  $group = $groups | Where-Object { $_.name -eq $name }
+  Write-Verbose ($groups | ConvertTo-Json -Depth 5)
 
   return $group
 }
@@ -113,23 +140,24 @@ function Toggle-Group ($name) {
 
   $groupId = $group.id
   
-  Write-Verbose "Group state: [$($group.state)]"
+  $currentGroupOnState = $group.on.on
 
-  $isOn = !!$group.state.all_on
+  Write-Verbose "Group state: [$currentGroupOnState]"
+
+  $isOn = !!$currentGroupOnState
   Write-Verbose "isOn is [$isOn] - object value is [$($group.state.all_on)]"
 
   $newState = !$isOn
 
-  $uri = "$(Get-GroupsUri)/$groupId/action"
-  $body = ConvertTo-Json -Compress @{ on = $newState }
+  $uri = "$(Get-GroupsUri)/$groupId"
+  $body = ConvertTo-Json -Compress @{ on = @{ on = $newState } }
 
   Write-Verbose "Updating group state with [$uri]`nbody = $body"
 
-  $res = Invoke-RestMethod `
-    -Uri $uri `
+  $res = Invoke-HueRequest `
+    -ResourcePath $uri `
     -Method PUT `
     -Body $body `
-    -SkipCertificateCheck
 
   if ($PlayBeep) {
     if ($newState) {
@@ -146,17 +174,15 @@ try {
   if ($Toggle) {
     $success = $false
     $retries = 3
-	$response
     
     while ($success -eq $false -and $retries -gt 0) {
-	  try {
-	    $response = Toggle-Group $GroupName
-		$success = $true
-	  } catch {
-		$retries -= 1
-		
+      try {
+        $response = Toggle-Group $GroupName
+        $success = $true
+      } catch {
+        $retries -= 1
         Write-Error $_.Exception
-	  }
+      }
     }
     
     return $response
