@@ -2,7 +2,8 @@
 Param(
 	[string] $StitchedFilename,
 
-	[switch] $DeleteOriginalFiles
+	[switch] $DeleteOriginalFiles,
+	[switch] $SkipBackup
 )
 
 $outputFolderPath = Get-Location
@@ -33,6 +34,24 @@ try {
 	if ($DeleteOriginalFiles) {
 		Remove-Item $files
 	}
+
+	if (!$SkipBackup) {
+		Write-Host "Backing up [$outputFilename]"
+
+		$localArchiveDir = "H:/do_not_backup/walks"
+		$remoteArchiveDir = "gs://walk-videos"
+
+		Write-Host "Writing to [$localArchiveDir]..."
+		Copy-Item $outputFilename $localArchiveDir
+		Write-Host "Done."
+
+		Write-Host "Writing to [$remoteArchiveDir]..."
+		gsutil cp $outputFilename $remoteArchiveDir
+		Write-Host "Done."
+	}
+
+	Add-Type -AssemblyName PresentationCore,PresentationFramework
+	[System.Windows.MessageBox]::Show("Backup has completed", "Invoke-StitchLocalGoPro.ps1", 0) | Out-Null
 } finally {
 	Remove-Item "files.txt" -ErrorAction SilentlyContinue
 }
