@@ -156,7 +156,7 @@ foreach ($index in $randomlyOrderedIndices) {
 
 	$curData = @{
 		Id = $video.id.videoId
-		Title = $title
+		Title = "$game - $title"
 		Description = (Get-Description $datetime)
 		PublishAt = $lastScheduledPublish.ToString("yyyy-MM-ddTHH:mm:ssZ")
 	}
