@@ -77,7 +77,7 @@ $descriptionBoilerplate
         throw "Failed to retrieve video upload URI"
       }
 
-      $global:sessionResult = $res
+      $sessionResult = $res
     } else {
       $res = @{ Headers = @{ Location = "https://mockurl.com" } }
     }
@@ -91,7 +91,7 @@ $descriptionBoilerplate
     if ($PSCmdlet.ShouldProcess("$uploadVideoEndpoint`n$(ConvertTo-Json $uploadArgs)", "Upload video bytes")) {
       $res = Invoke-WebRequest @uploadArgs
 
-      $global:uploadResult = $res
+      $uploadResult = $res
     }
 
     $config = Get-Content "$PSScriptRoot\trimvideo.config.json" | ConvertFrom-Json -AsHashtable
@@ -211,7 +211,7 @@ function Get-VideosSearch {
 
   $baseUri = "$apiBase/youtube/v3/search?part=snippet&forMine=true&type=video&maxResults=50&order=date"
 
-  $global:GetVideosSearchResults = @()
+  $GetVideosSearchResults = @()
   $videos = @()
 
   $nextPageToken = $null
@@ -228,7 +228,7 @@ function Get-VideosSearch {
       -Uri $uri `
       -Headers (Get-AuthorizationHeader)
 
-      $global:GetVideosSearchResults += $res
+      $GetVideosSearchResults += $res
 
     $videos += $res.items
 
@@ -251,7 +251,7 @@ function Get-Videos {
   $baseUri = "$apiBase/youtube/v3/videos?part=status,fileDetails&maxResults=50"
   $pageIndex = 0
 
-  $global:GetVideosResults = @()
+  $GetVideosResults = @()
 
   $videos = @()
 
@@ -273,7 +273,7 @@ function Get-Videos {
       -Uri $uri `
       -Headers (Get-AuthorizationHeader)
 
-    $global:GetVideosResults += $res
+    $GetVideosResults += $res
     $videos += $res.items
 
     $pageIndex++
@@ -301,8 +301,8 @@ function Update-Video {
     [string] $PublishAt
   )
 
-  if (!$global:UpdateVideoResults) {
-    $global:UpdateVideoResults = @()
+  if (!$UpdateVideoResults) {
+    $UpdateVideoResults = @()
   }
 
   $uri = "$apiBase/youtube/v3/videos?part=id,snippet,status"
@@ -358,7 +358,7 @@ function Update-Video {
       -Body $body `
       -Headers $headers
 
-    $global:UpdateVideoResults += @{ id = $Id; result = $res }
+    $UpdateVideoResults += @{ id = $Id; result = $res }
 
     if (!$res) {
       Write-Warning "Make sure you aren't using cached data ( ͡° ͜ʖ ͡°)"

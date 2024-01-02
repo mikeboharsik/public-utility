@@ -8,57 +8,33 @@ Param(
 
 	[switch] $SkipDescription,
 
-	[switch] $OnlyUpdateCache
+	[switch] $OnlyUpdateCache,
+	
+	[switch] $Commit
 )
 
 $combinedCachePath = "$PSScriptRoot\combinedCache.json"
 
 . '.\YouTube.ps1'
 
+Get-Random -SetSeed 140811 | Out-Null
+
 function Get-ShuffledIndices([int] $Count) {
-		[int[]] $result = @()
+	[int[]] $result = @()
+
+	do {
+		$cur = $null
 
 		do {
-			$cur = $null
+			[int] $cur = Get-Random -Minimum 0 -Maximum ($Count)
+		} while ($result.Contains($cur))
 
-			do {
-				[int] $cur = Get-Random -Minimum 0 -Maximum ($Count)
-			} while ($result.Contains($cur))
+		$result += $cur
+	} while ($result.Length -lt $Count)
 
-			$result += $cur
-		} while ($result.Length -lt $Count)
-
-		return $result
-	}
-
-function Get-Description {
-	[CmdletBinding()]
-	Param(
-		[Parameter(Mandatory = $true)]
-		$DateTime
-	)
-
-	if ($SkipDescription) {
-		return ''
-	}
-
-	$descriptionBoilerplate = "Feel free to use this footage for your own purposes. I would simply ask that you include a credit back to me for it."
-
-	$year = $datetime.Substring(0, 4)
-	$month = $datetime.Substring(5, 2)
-	$day = $datetime.Substring(8, 2)
-	$hour = $datetime.Substring(11, 2)
-	$minute = $datetime.Substring(14, 2)
-	$second = $datetime.Substring(17, 2)
-
-	$datetimeStr = "$year-$month-$day $($hour):$($minute):$second"
-
-	return @"
-$dateTimeStr
-
-$descriptionBoilerPlate
-"@.Trim()
+	return $result
 }
+
 
 function Get-ZeroedDate {
 	[CmdletBinding()]
@@ -109,9 +85,13 @@ if ($OnlyUpdateCache) {
 }
 
 # we can assume that the last published video is the first video returned that has a set description
-$lastVideoWithDescription = $YouTubeCombinedResults
-	| Where-Object { $_.snippet.description }
-	| Select-Object -First 1
+$lastVideoWithDescription = $YouTubeCombinedResults[0]
+
+foreach ($result in $YouTubeCombinedResults) {
+	if ($result.status.publishAt -gt $lastVideoWithDescription.status.publishAt) {
+		$lastVideoWithDescription = $result
+	}
+}
 
 if (!$lastVideoWithDescription) {
 	Write-Host "No videos to schedule"
@@ -126,7 +106,7 @@ Write-Verbose "`$lastPublishedAt (uploaded) = $lastPublishedAt"
 Write-Verbose "`$lastScheduledPublish = $lastScheduledPublish"
 
 [hashtable[]] $privateVideosWithoutSchedule = $YouTubeCombinedResults
-	| Where-Object { $null -eq $_.status.publishAt -and $_.snippet.publishedAt -gt $lastPublishedAt -and 'private' -eq $_.status.privacyStatus }
+	| Where-Object { $_.snippet.title -Match '^\d{4} \d{2} \d{2}' -and $null -eq $_.status.publishAt -and $_.snippet.publishedAt -gt $lastPublishedAt -and 'private' -eq $_.status.privacyStatus }
 	| Sort-Object { $_.snippet.publishedAt }
 
 Write-Verbose "Number of private videos without schedule: $($privateVideosWithoutSchedule.Length)"
@@ -146,22 +126,30 @@ $metadata = @()
 
 $randomlyOrderedIndices = Get-ShuffledIndices -Count $privateVideosWithoutSchedule.Length
 foreach ($index in $randomlyOrderedIndices) {
-	$video = $privateVideosWithoutSchedule[$index]
+	try {
+		$video = $privateVideosWithoutSchedule[$index]
 
-	Write-Verbose "`$video = $(ConvertTo-Json -Depth 10 -Compress $video)"
+		# Write-Verbose "`$video = $(ConvertTo-Json -Depth 10 -Compress $video)"
 
-	$game, $title, $datetime = ($video.fileDetails.fileName -Replace ".mp4", "") -Split " - "	
+		$lastScheduledPublish = $lastScheduledPublish.AddHours($scheduleIntervalHours)
 
-	$lastScheduledPublish = $lastScheduledPublish.AddHours($scheduleIntervalHours)
+		$curData = @{
+			Id = $video.id.videoId
+			Title = $video.snippet.title.Substring(11)
+			Description = ''
+			PublishAt = $lastScheduledPublish.ToString("yyyy-MM-ddTHH:mm:ssZ")
+		}
 
-	$curData = @{
-		Id = $video.id.videoId
-		Title = "$game - $title"
-		Description = (Get-Description $datetime)
-		PublishAt = $lastScheduledPublish.ToString("yyyy-MM-ddTHH:mm:ssZ")
+		if ($Commit) {
+			Update-Video @curData
+		} else {
+			Write-Verbose "Skipping commit for video [$($video.id.videoId)]"
+		}
+
+		$metadata += $curData
+	} catch {
+		Write-Error "Failed on video $(ConvertTo-Json -Depth 10 $video)"
 	}
-
-	Update-Video @curData
-
-	$metadata += $curData
 }
+
+Write-Host (ConvertTo-Json -Depth 10 $metadata)
