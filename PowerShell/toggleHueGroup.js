@@ -1,4 +1,5 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+process.removeAllListeners('warning');
 
 const [roomName] = process.argv.slice(2);
 
